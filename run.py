@@ -1,4 +1,4 @@
-from train import train
+from train import train_an_ensemble
 from scalablerunner.taskrunner import TaskRunner
 
 def run(config: dict) -> None: 
@@ -12,17 +12,18 @@ def run(config: dict) -> None:
 if __name__ == '__main__':
     ensemble_ids = list(range(128))
     path = '/opt/shared-disk2/sychou/ensemble'
-    
+    epoch = 10
+
     config = {
         'Section Train Ensemble':{
             'Group Train Ensemble':{
-                'Call': train,
+                'Call': train_an_ensemble,
                 'Param': {
-                    'id': [0, 1],
-                    'epoch': [10],
+                    'id': ensemble_ids,
+                    'epoch': [epoch],
                     'batch_size': [32],
                     'sel_label': [None], 
-                    'checkpoint_path': [path],
+                    'base_path': [path],
                 },
                 'Async':{
                     'gpu_id': [0, 1, 2, 3]

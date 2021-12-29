@@ -46,7 +46,8 @@ CKPT_PATH = 'checkpoints'
 RESULT_PATH = 'results'
 CKPT_ENSEMBLE_PREFIX = 'ensemble_'
 CKPT_NAME = 'ckpt'
-RECORD_NAME = 'record'
+RECORD_DIR_NAME = 'record'
+RECORD_NAME = 'record.pkl'
 
 def finite_CNN(input_shape: Tuple[int, ...], classes: int, classifier_activation: str='softmax'):
     layer_num = 8
@@ -127,16 +128,23 @@ def ensemble_ckpt_path(base_path: str):
     exp_path = os.path.join(base_path, CKPT_NAME)
     return exp_path
 
-def ensemble_records_path(base_path: str, id: int):
-    exp_path = os.path.join(base_path, RECORD_NAME)
+def ensemble_records_path(base_path: str):
+    exp_path = os.path.join(base_path, RECORD_DIR_NAME)
+    check_make_dir(path=exp_path)
+    print(f"exp_path: {exp_path}")
     return exp_path
 
-def save_history(history: object, base_path: str, id: int):
-    epx_path = ensemble_records_path(base_path=base_path, id=id)
+def ensemble_history_file(base_path: str):
+    return os.path.join(base_path, RECORD_NAME)
+
+def save_history(history: object, base_path: str):
+    epx_path = ensemble_records_path(base_path=base_path)
+    epx_path = ensemble_history_file(base_path=epx_path)
     save_pkl(obj=history, file=epx_path)
 
-def load_history(base_path: str, id: int):
-    epx_path = ensemble_records_path(base_path=base_path, id=id)
+def load_history(base_path: str):
+    epx_path = ensemble_records_path(base_path=base_path)
+    epx_path = ensemble_history_file(base_path=epx_path)
     return load_pkl(file=epx_path)
 
 def get_ckpt_callback(checkpoint_path: str):
@@ -228,7 +236,7 @@ def train(model: tf.keras.Model, x_train, y_train, x_test, y_test, batch_size, e
         ckpt_callback = get_ckpt_callback(checkpoint_path=base_path)        
         history = model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epoch, verbose="auto",
                   validation_data=(x_test, y_test), validation_freq=1, callbacks=[ckpt_callback])
-        save_history(history=history, base_path=base_path, id=id)
+        save_history(history=history.history, base_path=base_path)
     else:
         # No checkpoint
         history = model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epoch, verbose="auto",
@@ -239,16 +247,19 @@ def train(model: tf.keras.Model, x_train, y_train, x_test, y_test, batch_size, e
 
     return model, y_pred, loss, acc
 
-def load_an_ensemble(id: int, input_shape: Tuple[int, ...], classes: int, model_type: str, ckpt_path: str=CKPT_PATH, classifier_activation: str='softmax'):
+def load_an_ensemble(id: int, input_shape: Tuple[int, ...], classes: int, model_type: str, base_path: str=RESULT_PATH, classifier_activation: str='softmax'):
     model = get_model_arch(input_shape=input_shape, classes=classes, model_type=model_type, classifier_activation=classifier_activation)
     model = compile(model)
-    model_path = ensemble_ckpt_path(ckpt_path=ckpt_path, id=id)
+    model_path = ensemble_ckpt_path(ensemble_path(base_path=base_path, id=id))
     print(f"{model_path}")
     model.load_weights(model_path)
     return model
 
+# def load_ensemble(input_shape: Tuple[int, ...], classes: int, model_type: str, ckpt_path: str=CKPT_PATH, classifier_activation: str='softmax'):
+
+
 def evaluate(model: tf.keras.Model, x_test, y_test):
-    loss, acc = model.evaluate(x_test, y_test, verbose='auto')
+    loss, acc = model.evaluate(x_test, y_test, verbose=2)
     return model, loss, acc
 
 # def train_loop(model, x_train, y_train, x_test, y_test, batch_size):
@@ -290,8 +301,8 @@ def train_an_ensemble(gpu_id: str, epoch: int, id: int=0, sel_label: List[int]=N
 # %%
 if __name__ == '__main__':
     # init_env('2')
-    train_an_ensemble(gpu_id='2', epoch=2, id=0, base_path=RESULT_PATH)
-    model = load_an_ensemble(id=0, input_shape=(32, 32, 3), classes=10, model_type=FINITE_CNN_MODEL, ckpt_path=CKPT_PATH, classifier_activation='softmax')
+    train_an_ensemble(gpu_id='2', epoch=1, id=0, base_path=RESULT_PATH)
+    model = load_an_ensemble(id=0, input_shape=(32, 32, 3), classes=10, model_type=FINITE_CNN_MODEL, base_path=RESULT_PATH, classifier_activation='softmax')
     (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=None, is_onehot=True)
     evaluate(model=model, x_test=x_test, y_test=y_test)
 # %%
