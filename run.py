@@ -10,15 +10,16 @@ def run(config: dict) -> None:
     tr.run()
 
 if __name__ == '__main__':
-    ensemble_ids = list(range(128))
-    path = '/opt/shared-disk2/sychou/ensemble'
-    epoch = 10
+    ensemble_ids = list(range(64))
+    path = '/opt/shared-disk2/sychou/ensemble/w1024'
+    epoch = 20
 
     config = {
         'Section Train Ensemble':{
             'Group Train Ensemble':{
                 'Call': train_an_ensemble,
                 'Param': {
+                    'width': [1024],
                     'id': ensemble_ids,
                     'epoch': [epoch],
                     'batch_size': [32],
@@ -26,7 +27,7 @@ if __name__ == '__main__':
                     'base_path': [path],
                 },
                 'Async':{
-                    'gpu_id': [0, 1, 2, 3]
+                    'gpu_id': ['0', '2', '3']
                 }
             }
         }
