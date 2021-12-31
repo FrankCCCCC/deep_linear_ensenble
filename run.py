@@ -1,4 +1,4 @@
-from train import train_an_ensemble
+from train import train_a_model, ModelMgr
 from scalablerunner.taskrunner import TaskRunner
 
 def run(config: dict) -> None: 
@@ -11,18 +11,25 @@ def run(config: dict) -> None:
 
 if __name__ == '__main__':
     ensemble_ids = list(range(64))
-    path = '/opt/shared-disk2/sychou/ensemble/w1024'
-    epoch = 20
+    path = '/opt/shared-disk2/sychou/ensemble/model_search'
+    epoch = 30
 
     config = {
-        'Section Train Ensemble':{
-            'Group Train Ensemble':{
-                'Call': train_an_ensemble,
+        'Section Model Arch Search':{
+            'Group Model Arch Search':{
+                'Call': train_a_model,
                 'Param': {
-                    'width': [1024],
-                    'id': ensemble_ids,
+                    'width': [256, 512, 1024, 2048, 4096],
+                    # 'id': ensemble_ids,
+                    'id': [None],
+                    'model_type': [ModelMgr.FINITE_CNN_MODEL],
+                    'classifier_activation': [None], 
+                    'layer_num': [5],
+                    'conv_block': [1, 2, 3],
+                    'is_freeze': [True],
                     'epoch': [epoch],
                     'batch_size': [32],
+                    'lr': [0.001],
                     'sel_label': [None], 
                     'base_path': [path],
                 },
