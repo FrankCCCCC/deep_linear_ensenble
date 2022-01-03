@@ -47,8 +47,8 @@ def load_pkl(file: str):
 SHARE_DISK = '/opt/shared-disk2/sychou/ensemble'
 
 def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_block: int, channel: int, classifier_activation: str):
-    strides = (1, 1)
-    # strides = (2, 2)
+    # strides = (1, 1)
+    strides = (2, 2)
     padding = 'same'
     pool_size = (2, 2)
     kernel_size = (3, 3)
@@ -66,10 +66,10 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
 
     inputs = layers.Input(shape=input_shape)
     for j in range(conv_block):
-        x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
+        x = layers.Conv2D(channel, (3, 3), strides=(1, 1), activation='relu', padding=padding,
                           kernel_initializer=weight_init, bias_initializer=bias_init)(inputs)
-    # x = layers.Conv2D(channel, (3, 3), strides=strides, activation='relu', padding=padding,
-    #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
+        # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
+        #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
     # x = layers.LayerNormalization()(x)
     x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
     # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
@@ -77,12 +77,12 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
 
     for i in range(layer_num - 1):
         for j in range(conv_block):
-            x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
-                            kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-        # x = layers.Conv2D(channel, (3, 3), strides=strides, activation='relu', padding=padding,
-        #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
+            x = layers.Conv2D(channel, (3, 3), strides=(1, 1), activation='relu', padding=padding,
+                              kernel_initializer=weight_init, bias_initializer=bias_init)(x)
+            # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
+            #                 kernel_initializer=weight_init, bias_initializer=bias_init)(x)
         # x = layers.LayerNormalization()(x)
-        x = layers.AveragePooling2D(pool_size=(2, 2), strides=None, padding=padding)(x)
+        x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
         # x = layers.LayerNormalization()(x)
         # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
 
@@ -91,7 +91,7 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
 
     x = layers.Flatten()(x)
     # x = tf.keras.layers.GlobalAveragePooling2D(keepdims=False)(x)
-    x = layers.Dense(1024,  activation='relu', 
+    x = layers.Dense(channel,  activation='relu', 
                      kernel_initializer=weight_init, bias_initializer=bias_init)(x)
     # x = layers.LayerNormalization()(x)
     x = layers.Dense(classes, activation=classifier_activation, 
@@ -125,7 +125,7 @@ class ModelMgr():
 
     @staticmethod
     def print_layers_freeze(model):
-        layers_info = "Is freeze layers - "
+        layers_info = "Is trainable layers - "
         for i, layer in enumerate(model.layers):
             layers_info += f"[{i}]: {layer.trainable}"
         print(layers_info)
@@ -515,16 +515,16 @@ def get_model_infos(model):
         layer_weights.append(w)
 # %%
 if __name__ == '__main__':
-    # init_env('1')
-    train_a_model(gpu_id='0', layer_num=5, width=2048, conv_block=1, epoch=10, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
+    init_env('1')
+    # train_a_model(gpu_id='0', layer_num=5, width=4096, conv_block=1, epoch=10, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
 
     record_mgr = RecordMgr.get_ensemble_model_RecordMgr(base_path=RecordMgr.RESULT_PATH, id=0)
-    model = record_mgr.load_model()
+    # model = record_mgr.load_model()
     (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=None, is_onehot=True)
-    evaluate_model(model=model, x_test=x_test, y_test=y_test)
+    # evaluate_model(model=model, x_test=x_test, y_test=y_test)
 
-    # model_list = load_ensemble(num_model=50, input_shape=(32, 32, 3), classes=10, model_type=FINITE_CNN_MODEL, base_path=SHARE_DISK, classifier_activation='softmax')
-    # model_list, loss, acc = evaluate_ensemble(model_list=model_list, x_test=x_test, y_test=y_test, eval_non_act=True)
+    model_list = record_mgr.load_ensemble(num_model=50, input_shape=(32, 32, 3), classes=10, model_type=ModelMgr.FINITE_CNN_MODEL, base_path=SHARE_DISK, classifier_activation=None)
+    model_list, loss, acc = evaluate_ensemble(model_list=model_list, x_test=x_test, y_test=y_test, eval_non_act=False)
 
 # %%
 """
