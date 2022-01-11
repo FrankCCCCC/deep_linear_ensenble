@@ -59,7 +59,8 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
     # weight_init_std = np.sqrt(2) / np.sqrt(channel)
     # dense_weight_init_std = np.sqrt(2) / np.sqrt(classes)
 
-    weight_init = tf.keras.initializers.HeNormal()
+    # weight_init = tf.keras.initializers.HeNormal()
+    weight_init = tf.keras.initializers.Orthogonal(gain=1.0)
     # weight_init = tf.random_normal_initializer(mean=0.0, stddev=weight_init_std)
     # dense_weight_init = tf.random_normal_initializer(mean=0.0, stddev=dense_weight_init_std)
     bias_init = tf.random_normal_initializer(mean=0.0, stddev=bias_init_std)
@@ -71,6 +72,7 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
         # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
         #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
     # x = layers.LayerNormalization()(x)
+    # x = tf.keras.activations.sigmoid(x)
     x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
     # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
     # x = layers.LayerNormalization()(x)
@@ -82,6 +84,7 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
             # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
             #                 kernel_initializer=weight_init, bias_initializer=bias_init)(x)
         # x = layers.LayerNormalization()(x)
+        # x = tf.keras.activations.sigmoid(x)
         x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
         # x = layers.LayerNormalization()(x)
         # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
@@ -94,6 +97,7 @@ def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_
     x = layers.Dense(channel,  activation='relu', 
                      kernel_initializer=weight_init, bias_initializer=bias_init)(x)
     # x = layers.LayerNormalization()(x)
+    # x = tf.keras.activations.sigmoid(x)
     x = layers.Dense(classes, activation=classifier_activation, 
                      kernel_initializer=weight_init, bias_initializer=bias_init)(x)
     # x = layers.Dense(classes, activation=None, 
@@ -515,16 +519,16 @@ def get_model_infos(model):
         layer_weights.append(w)
 # %%
 if __name__ == '__main__':
-    init_env('1')
-    # train_a_model(gpu_id='0', layer_num=5, width=4096, conv_block=1, epoch=10, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
+    # init_env('1')
+    train_a_model(gpu_id='0', layer_num=5, width=1024, conv_block=1, epoch=30, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
 
     record_mgr = RecordMgr.get_ensemble_model_RecordMgr(base_path=RecordMgr.RESULT_PATH, id=0)
-    # model = record_mgr.load_model()
+    model = record_mgr.load_model()
     (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=None, is_onehot=True)
-    # evaluate_model(model=model, x_test=x_test, y_test=y_test)
+    evaluate_model(model=model, x_test=x_test, y_test=y_test)
 
-    model_list = record_mgr.load_ensemble(num_model=50, input_shape=(32, 32, 3), classes=10, model_type=ModelMgr.FINITE_CNN_MODEL, base_path=SHARE_DISK, classifier_activation=None)
-    model_list, loss, acc = evaluate_ensemble(model_list=model_list, x_test=x_test, y_test=y_test, eval_non_act=False)
+    # model_list = record_mgr.load_ensemble(num_model=50, input_shape=(32, 32, 3), classes=10, model_type=ModelMgr.FINITE_CNN_MODEL, base_path=SHARE_DISK, classifier_activation=None)
+    # model_list, loss, acc = evaluate_ensemble(model_list=model_list, x_test=x_test, y_test=y_test, eval_non_act=False)
 
 # %%
 """
