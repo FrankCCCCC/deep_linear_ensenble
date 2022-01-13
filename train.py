@@ -1,8 +1,10 @@
 # %%
 import os
-from typing import List, Tuple
+from turtle import st
+from typing import List, Tuple, Union
 import pickle
 import json
+from datetime import datetime
 
 import numpy as np
 import tensorflow as tf
@@ -13,13 +15,23 @@ import matplotlib.pyplot as plt
 from tensorflow.python.keras.backend import update
 from tensorflow.python.types.core import Value
 from tqdm import tqdm
+from sklearn.preprocessing import StandardScaler
 
 # from dataset import Dataset
 from scalablerunner.taskrunner import TaskRunner
+from model import ModelMgr
 
-def init_env(gpu_id: str):
-    tf.keras.backend.set_floatx('float32')
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+def init_env(gpu_id: str, float64: bool=False):
+    if float64:
+        tf.keras.backend.set_floatx('float64')
+    else:
+        tf.keras.backend.set_floatx('float32')
+    if gpu_id is not None:
+        if isinstance(gpu_id, str):
+            if gpu_id.lower() != 'none':
+                os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+                return
+    os.environ["CUDA_VISIBLE_DEVICES"] = ''
     # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "1.0"
     # os.environ['TF_FORCE_UNIFIED_MEMORY'] = '1'
     
@@ -46,159 +58,13 @@ def load_pkl(file: str):
 
 SHARE_DISK = '/opt/shared-disk2/sychou/ensemble'
 
-def finite_CNN(input_shape: Tuple[int, ...], classes: int, layer_num: int, conv_block: int, channel: int, classifier_activation: str):
-    # strides = (1, 1)
-    strides = (2, 2)
-    padding = 'same'
-    pool_size = (2, 2)
-    kernel_size = (3, 3)
-
-    # weight_init_std = np.sqrt(2)
-    bias_init_std = np.sqrt(0.01)
-
-    # weight_init_std = np.sqrt(2) / np.sqrt(channel)
-    # dense_weight_init_std = np.sqrt(2) / np.sqrt(classes)
-
-    # weight_init = tf.keras.initializers.HeNormal()
-    weight_init = tf.keras.initializers.Orthogonal(gain=1.0)
-    # weight_init = tf.random_normal_initializer(mean=0.0, stddev=weight_init_std)
-    # dense_weight_init = tf.random_normal_initializer(mean=0.0, stddev=dense_weight_init_std)
-    bias_init = tf.random_normal_initializer(mean=0.0, stddev=bias_init_std)
-
-    inputs = layers.Input(shape=input_shape)
-    for j in range(conv_block):
-        x = layers.Conv2D(channel, (3, 3), strides=(1, 1), activation='relu', padding=padding,
-                          kernel_initializer=weight_init, bias_initializer=bias_init)(inputs)
-        # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
-        #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-    # x = layers.LayerNormalization()(x)
-    # x = tf.keras.activations.sigmoid(x)
-    x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
-    # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
-    # x = layers.LayerNormalization()(x)
-
-    for i in range(layer_num - 1):
-        for j in range(conv_block):
-            x = layers.Conv2D(channel, (3, 3), strides=(1, 1), activation='relu', padding=padding,
-                              kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-            # x = layers.Conv2D(channel, kernel_size, strides=strides, activation='relu', padding=padding,
-            #                 kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-        # x = layers.LayerNormalization()(x)
-        # x = tf.keras.activations.sigmoid(x)
-        x = layers.AveragePooling2D(pool_size=pool_size, strides=None, padding=padding)(x)
-        # x = layers.LayerNormalization()(x)
-        # x = layers.MaxPool2D(pool_size=pool_size, strides=None, padding=padding)(x)
-
-    # x = layers.Conv2D(256, (3, 3), strides=(1, 1), activation='relu', padding='same',
-    #                   kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-
-    x = layers.Flatten()(x)
-    # x = tf.keras.layers.GlobalAveragePooling2D(keepdims=False)(x)
-    x = layers.Dense(channel,  activation='relu', 
-                     kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-    # x = layers.LayerNormalization()(x)
-    # x = tf.keras.activations.sigmoid(x)
-    x = layers.Dense(classes, activation=classifier_activation, 
-                     kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-    # x = layers.Dense(classes, activation=None, 
-    #                  kernel_initializer=weight_init, bias_initializer=bias_init)(x)
-
-    return Model(inputs, x, name='Finite_CNN')
-
-class ModelMgr():
-    VGG19_MODEL = 'VGG19'
-    FINITE_CNN_MODEL = 'FINITE_CNN'
-
-    METRIC_NAME = 'accuracy'
-    LOSS_NAME = 'loss'
-
-    METRIC_TYPE = 'Categorical Accuracy'
-    LOSS_TYPE = 'MSE'
-
-    CKPT_MONITOR = f'val_{METRIC_NAME}'
-
-    def __init__(self, input_shape: Tuple[int, ...], classes: int, model_type: str, layer_num: int=8, width: int=512, conv_block: int=1, classifier_activation: str='softmax', is_freeze: bool=True):
-        self.input_shape = input_shape
-        self.classes = classes
-        self.model_type = model_type
-        self.layer_num = layer_num
-        self.width = width
-        self.conv_block = conv_block
-        self.classifier_activation = classifier_activation
-        self.is_freeze = is_freeze
-
-    @staticmethod
-    def print_layers_freeze(model):
-        layers_info = "Is trainable layers - "
-        for i, layer in enumerate(model.layers):
-            layers_info += f"[{i}]: {layer.trainable}"
-        print(layers_info)
-
-    @staticmethod
-    def get_ckpt_callback(checkpoint_path: str):
-        ckpt_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
-                                                            save_weights_only=False,
-                                                            monitor=ModelMgr.CKPT_MONITOR,
-                                                            save_best_only=True,
-                                                            mode='max',
-                                                            verbose=1)
-        return ckpt_callback
-
-    @staticmethod
-    def compile(model, learning_rate: float=0.001):
-        model.compile(
-                    #   optimizer=tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.0, nesterov=False, name='SGD'),
-                    optimizer=tf.keras.optimizers.Nadam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-07),
-                    loss=tf.keras.losses.MeanSquaredError(name=ModelMgr.LOSS_NAME),
-                    #   loss=tf.keras.losses.CategoricalCrossentropy(),
-                    metrics=[tf.keras.metrics.CategoricalAccuracy(name=ModelMgr.METRIC_NAME)]
-                    #   metrics=[tf.keras.metrics.BinaryAccuracy(threshold=0.5)]
-                    )
-
-        # model.compile(optimizer='adam',
-        #               loss='sparse_categorical_crossentropy',
-        #               metrics=['accuracy'])
-
-        return model
-
-    def get_model_arch(self):
-        if self.model_type == ModelMgr.VGG19_MODEL:
-            model = VGG19(weights=None, input_shape=self.input_shape, classes=self.classes, classifier_activation=self.classifier_activation)
-        elif self.model_type == ModelMgr.FINITE_CNN_MODEL:
-            model = finite_CNN(input_shape=self.input_shape, classes=self.classes, layer_num=self.layer_num, channel=self.width, conv_block=self.conv_block, classifier_activation=self.classifier_activation)
-        else:
-            raise ValueError(f'No such model called {self.model_type}')
-        return model
-
-    def get_model(self):
-        model = self.get_model_arch()
-        
-        model.summary()
-        print(f"Number of layers: {len(model.layers)}")
-        if self.is_freeze:
-            for layer in model.layers:
-                layer.trainable = False
-            model.layers[-1].trainable = True
-
-        ModelMgr.print_layers_freeze(model=model)
-
-        return model
-
-    def get_ensemble(self, n_model: int):
-        ensembles = []
-        for i in range(n_model):
-            ensembles.append(self.get_model())
-
-        ensembles[0].summary()
-
-        return ensembles
-
 class RecordMgr():
     CKPT_PATH = 'checkpoints'
     RESULT_PATH = 'results'
     CKPT_ENSEMBLE_PREFIX = 'ensemble_'
     CKPT_NAME = 'ckpt'
     SAVED_MOEDL_NAME = 'saved_model.h5'
+    SAVED_LIN_REG_NAME = 'saved_lin_reg.pkl'
     RECORD_DIR_NAME = 'record'
     RECORD_NAME = 'record.pkl'
     CONFIG_NAME = 'config.json'
@@ -226,6 +92,10 @@ class RecordMgr():
 
     def get_saved_model_path(self):
         saved_model_path = os.path.join(self.get_model_ckpt_path(), RecordMgr.SAVED_MOEDL_NAME)
+        return saved_model_path
+
+    def get_saved_lin_reg_path(self):
+        saved_model_path = os.path.join(self.get_model_ckpt_path(), RecordMgr.SAVED_LIN_REG_NAME)
         return saved_model_path
 
     def get_model_records_path(self):
@@ -279,6 +149,12 @@ class RecordMgr():
             model_list.append(model)
         
         return model_list
+
+    def save_lin_reg(self, w):
+        save_pkl(obj=w, file=self.get_saved_lin_reg_path())
+
+    def load_lin_reg(self):
+        return load_pkl(file=self.get_saved_lin_reg_path())
 
 def _normalize(x):
     """Flatten all but the first dimension of an `np.ndarray`."""
@@ -339,34 +215,164 @@ def get_CIFAR10(sel_label: List[int]=None, is_onehot: bool=True):
 #         keys = list(logs.keys())
 #         print("...Training: end of batch {}; got log keys: {}".format(batch, keys))
 
-def train(model: tf.keras.Model, x_train, y_train, x_test, y_test, batch_size, epoch, lr: float=0.001, base_path: str=None, config: dict=None):
-    model = ModelMgr.compile(model, learning_rate=lr)
-    record_mgr = RecordMgr(base_path=base_path)
-    visulize_mgr = VisulaizeMgr(base_path=base_path)
+class Training():
+    def __init__(self, batch_size: int=32, epoch: int=30, lr: float=0.001, l2_regular: float=1e-2, normalize: bool=False, base_path: str=None):
+        self.batch_size = batch_size
+        self.epoch = epoch
+        self.lr = lr
+        self.base_path = base_path
+        self.l2_regular = l2_regular
+        self.normalize = normalize
+        self.scaler = None
+        if normalize:
+            self.scaler = StandardScaler()
 
-    if config is not None:
-        record_mgr.save_config(config=config)
+    def __init_training(self, model: tf.keras.Model, base_path: str=None, config: dict=None):
+        model = ModelMgr.compile(model, learning_rate=self.lr)
+        record_mgr = RecordMgr(base_path=base_path)
+        visulize_mgr = VisulaizeMgr(base_path=base_path)
 
-    if base_path is not None:
-        ckpt_callback = ModelMgr.get_ckpt_callback(checkpoint_path=record_mgr.get_saved_model_path())        
-        history = model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epoch, verbose="auto",
-                  validation_data=(x_test, y_test), validation_freq=1, callbacks=[ckpt_callback])
-        record_mgr.save_history(history=history.history)
-    else:
-        # No checkpoint
-        history = model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epoch, verbose="auto",
-                  validation_data=(x_test, y_test), validation_freq=1)
+        if config is not None:
+            record_mgr.save_config(config=config)
+        return model, record_mgr, visulize_mgr
 
-    visulize_mgr.plot_history(history=record_mgr.load_history())
+    @staticmethod
+    def __svd_inverse(M: Union[np.ndarray, tf.Tensor]):
+        s, u, v = tf.linalg.svd(M)
+        inv_diag = 1/s * tf.eye(s.shape[0])
+        # print(f"v: {v.shape}, inv_diag: {inv_diag.shape}, u: {u.shape}")
+        return tf.linalg.matmul(tf.linalg.matmul(v, inv_diag), tf.transpose(u))
 
-    model, loss, acc = evaluate_model(model=model, x_test=x_test, y_test=y_test)
-    y_pred = model.predict(x_test)
+    @staticmethod
+    def __inverse(M: Union[np.ndarray, tf.Tensor]):
+        return tf.linalg.inv(M)
 
-    return model, y_pred, loss, acc
+    @staticmethod
+    def __solve_lin_sys(A: Union[np.ndarray, tf.Tensor], y: Union[np.ndarray, tf.Tensor], l2_regular: float):
+        cov = tf.linalg.matmul(tf.transpose(A), A)
+        pre_inv = cov + l2_regular * tf.eye(cov.shape[0])
+        trans_label = tf.linalg.matmul(tf.transpose(A), y)
+        return tf.linalg.matmul(Training.__svd_inverse(M=pre_inv), trans_label)
 
-def evaluate_model(model: tf.keras.Model, x_test, y_test):
-    loss, acc = model.evaluate(x_test, y_test, verbose=2)
-    return model, loss, acc
+    @staticmethod
+    def __compute_w(model: tf.keras.Model, x_train, y_train, l2_regular: float, normalize: bool):
+        print("Dataset is embedding...")
+        start = datetime.now()
+        x_train_embed = Training.model_predict(model=model, x=x_train)
+        end = datetime.now()
+        print(f"Dataset has been Embedded - Time: {end - start}")
+        scaler = None
+        if normalize:
+            scaler = StandardScaler()
+            x_train_embed = scaler.fit_transform(X=x_train_embed)
+        return Training.__solve_lin_sys(A=x_train_embed, y=y_train, l2_regular=l2_regular), scaler
+
+    @staticmethod
+    def MSE_CatAcc(y_pred, y_test):
+        loss_metric = tf.keras.losses.MeanSquaredError()
+        eval_metric = tf.keras.metrics.CategoricalAccuracy()
+
+        eval_metric.update_state(y_test, y_pred)
+        pred_acc = eval_metric.result().numpy()
+        pred_loss = loss_metric(y_test, y_pred)
+        return pred_loss, pred_acc
+
+    @staticmethod
+    def model_predict(model: tf.keras.Model, x: Union[np.ndarray, tf.Tensor]):
+        y_pred = model.predict(x)
+        return y_pred
+
+    @staticmethod
+    def lin_reg_predict(model: tf.keras.Model, w, x_test: Union[np.ndarray, tf.Tensor], scaler):
+        x_test_embed = model.predict(x_test)
+        if scaler is not None:
+            x_test_embed = scaler.transform(x_test_embed)
+        y_pred = tf.linalg.matmul(x_test_embed, w)
+        return y_pred
+
+    @staticmethod
+    def evaluate_linear_reg(model: tf.keras.Model, w, x_test, y_test, scaler):
+        y_pred = Training.lin_reg_predict(model=model, w=w, x_test=x_test, scaler=scaler)
+        loss, acc = Training.MSE_CatAcc(y_pred=y_pred, y_test=y_test)
+        return model, loss, acc
+
+    @staticmethod
+    def evaluate_model(model: tf.keras.Model, x_test, y_test):
+        # Built-in method
+        # loss, acc = model.evaluate(x_test, y_test, verbose=2)
+
+        # For testing new method
+        y_pred = Training.model_predict(model=model, x=x_test)
+        loss, acc = Training.MSE_CatAcc(y_pred=y_pred, y_test=y_test)
+        return model, loss, acc
+
+    def linear_reg_fit(self, model: tf.keras.Model, x_train, y_train, x_test, y_test, base_path: str=None, config: dict=None):
+        model, record_mgr, visulize_mgr = self.__init_training(model=model, base_path=base_path, config=config)
+
+        print("Solving linear system...")
+        start = datetime.now()
+        w, scaler = Training.__compute_w(model=model, x_train=x_train, y_train=y_train, l2_regular=self.l2_regular, normalize=self.normalize)
+        end = datetime.now()
+        print(f"Linear system has been sovled - Time: {end - start}")
+        self.scaler = scaler
+
+        if base_path is not None:
+            record_mgr.save_model(model=model)
+            record_mgr.save_lin_reg(w=w)
+
+        model, loss, acc = self.evaluate_linear_reg(model=model, w=w, x_test=x_test, y_test=y_test, scaler=self.scaler)
+        return model, loss, acc
+
+    def keras_fit(self, model: tf.keras.Model, x_train, y_train, x_test, y_test, base_path: str=None, config: dict=None):
+        model, record_mgr, visulize_mgr = self.__init_training(model=model, base_path=base_path, config=config)
+
+        if base_path is not None:
+            ckpt_callback = ModelMgr.get_ckpt_callback(checkpoint_path=record_mgr.get_saved_model_path())
+            history = model.fit(x=x_train, y=y_train, batch_size=self.batch_size, epochs=self.epoch, verbose="auto",
+                    validation_data=(x_test, y_test), validation_freq=1, callbacks=[ckpt_callback])
+            record_mgr.save_history(history=history.history)
+        else:
+            # No checkpoint
+            history = model.fit(x=x_train, y=y_train, batch_size=self.batch_size, epochs=self.epoch, verbose="auto",
+                    validation_data=(x_test, y_test), validation_freq=1)
+
+        visulize_mgr.plot_history(history=record_mgr.load_history())
+
+        model, loss, acc = self.evaluate_model(model=model, x_test=x_test, y_test=y_test)
+        return model, loss, acc
+
+    def train_a_model(self, gpu_id: str, id: int=0, sel_label: List[int]=None, layer_num: int=5, width: int=512, kernel_size: Tuple[int, int]=(3, 3), conv_block: int=1,
+                      model_type: str=ModelMgr.FINITE_CNN_MODEL, classifier_activation: str='softmax', is_freeze: bool=True, closed_form: bool=False, float64: bool=False):
+        is_onehot = True
+        config = locals()
+        del config['self']
+        print(config)
+
+        if sel_label is not None:
+            classes = len(sel_label)
+            if classes == 2:
+                is_onehot = False
+        else:
+            classes = 10
+
+        if id is not None:
+            # Ensemble directory
+            exp_path = RecordMgr.get_ensemble_model_path(base_path=self.base_path, id=id)
+        else:
+            # Hyperparameter naming
+            exp_path = os.path.join(self.base_path, f'{model_type}_ln-{layer_num}_w-{width}_cb-{conv_block}_act-{classifier_activation}_ep-{self.epoch}_bs-{self.batch_size}_lr-{self.lr}')
+        model_mgr = ModelMgr(input_shape=(32, 32, 3), classes=classes, model_type=model_type, layer_num=layer_num, width=width, kernel_size=kernel_size, conv_block=conv_block, classifier_activation=classifier_activation, is_freeze=is_freeze)
+
+        init_env(gpu_id=gpu_id, float64=float64)
+        (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=sel_label, is_onehot=is_onehot)
+        # print(f"y_train.shape OneHot: {y_train.shape}")
+        model = model_mgr.get_model()
+        if closed_form:
+            model, loss, acc = self.linear_reg_fit(model, x_train, y_train, x_test, y_test, base_path=exp_path, config=config)
+        else:
+            model, loss, acc = self.keras_fit(model, x_train, y_train, x_test, y_test, base_path=exp_path, config=config)
+
+        print(f"Evaluate - Acc: {acc} | Loss: {loss}")
 
 def evaluate_ensemble(model_list: List[tf.keras.Model], x_test, y_test, eval_non_act: bool=False):
     loss_metric = tf.keras.losses.MeanSquaredError()
@@ -380,11 +386,7 @@ def evaluate_ensemble(model_list: List[tf.keras.Model], x_test, y_test, eval_non
     for i, model in enumerate(tqdm(model_list)):
         loss_metric_ensemble = tf.keras.losses.MeanSquaredError()
         eval_metric_ensemble = tf.keras.metrics.CategoricalAccuracy()
-        y_pred, layer_inputs, layer_outputs, layer_weights, layer_outputs_non_act = model_predict(model=model, x_test=x_test)
-        # print(f"y_pred_ensemble.shape: {y_pred_ensemble.shape} | y_pred.shape: {y_pred.shape}")
-        # if eval_non_act:
-        #     y_pred_ensemble.append(layer_outputs_non_act[-1])
-        # else:
+        y_pred = model_predict(model=model, x_test=x_test)
         y_pred_ensemble.append(y_pred)
         
         eval_metric_ensemble.update_state(y_test, y_pred)
@@ -402,8 +404,6 @@ def evaluate_ensemble(model_list: List[tf.keras.Model], x_test, y_test, eval_non
     y_pred_ensemble = np.stack(y_pred_ensemble, axis=0)
     print(f"y_pred_ensemble.shape: {y_pred_ensemble.shape}")
     y_pred_mean = np.mean(y_pred_ensemble, axis=0)
-    # if eval_non_act:
-    #     y_pred_mean = tf.nn.softmax(y_pred_mean)
     print(f"y_pred_mean.shape: {y_pred_mean.shape}")
     eval_metric.update_state(y_test, y_pred_mean)
     acc = eval_metric.result().numpy()
@@ -412,60 +412,6 @@ def evaluate_ensemble(model_list: List[tf.keras.Model], x_test, y_test, eval_non
     print(f"{len(model_list)} Ensemble Eval - Acc: {acc} | Loss: {loss}")
     
     return model_list, loss, acc
-
-def model_predict(model: tf.keras.Model, x_test, is_get_layer_input: bool=False, is_get_layer_output: bool=False, is_get_layer_output_non_act: bool=False, is_get_layer_weight: bool=False):
-    y_pred = model.predict(x_test)
-
-    layer_inputs = []
-    if is_get_layer_input:
-        for layer in model.layers:
-            layer_inputs.append(layer.input)
-
-    layer_outputs = []
-    if is_get_layer_output:
-        for layer in model.layers:
-            layer_outputs.append(layer.output)
-
-    layer_weights = []
-    if is_get_layer_weight:
-        for layer in model.layers:
-            layer_weights.append(layer.get_weights())
-
-    layer_outputs_non_act = []
-    if is_get_layer_output_non_act:
-        for layer in model.layers:
-            # print(f"layer.weights type: {layer.weights} | layer.input.shape: {layer.input.shape}")
-            print(f"layer.weights.shape: {layer.weights[0].shape} | layer.input.shape: {layer.input.shape}")
-            output_non_act = tf.matmul(layer.weights[0], layer.input)
-            layer_outputs_non_act.append(output_non_act)
-
-    return y_pred, layer_inputs, layer_outputs, layer_weights, layer_outputs_non_act
-
-def train_a_model(gpu_id: str, epoch: int, id: int=0, sel_label: List[int]=None, batch_size: int=32, layer_num: int=8, width: int=512, conv_block: int=1,
-                  model_type: str=ModelMgr.FINITE_CNN_MODEL, classifier_activation: str='softmax', is_freeze: bool=True, lr: float=0.001, base_path: str=None):
-    is_onehot = True
-    config = locals()
-
-    if sel_label is not None:
-        classes = len(sel_label)
-        if classes == 2:
-            is_onehot = False
-    else:
-        classes = 10
-
-    if id is not None:
-        # Ensemble directory
-        exp_path = RecordMgr.get_ensemble_model_path(base_path=base_path, id=id)
-    else:
-        # Hyperparameter naming
-        exp_path = os.path.join(base_path, f'{model_type}_ln-{layer_num}_w-{width}_cb-{conv_block}_act-{classifier_activation}_ep-{epoch}_bs-{batch_size}_lr-{lr}')
-    model_mgr = ModelMgr(input_shape=(32, 32, 3), classes=classes, model_type=model_type, layer_num=layer_num, width=width, conv_block=conv_block, classifier_activation=classifier_activation, is_freeze=is_freeze)
-
-    init_env(gpu_id=gpu_id)
-    (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=sel_label, is_onehot=is_onehot)
-    # print(f"y_train.shape OneHot: {y_train.shape}")
-    model = model_mgr.get_model()
-    model, y_pred, loss, acc = train(model, x_train, y_train, x_test, y_test, batch_size, epoch, lr, base_path=exp_path, config=config)
 
 class VisulaizeMgr():
     def __init__(self, base_path: str):
@@ -519,13 +465,16 @@ def get_model_infos(model):
         layer_weights.append(w)
 # %%
 if __name__ == '__main__':
-    # init_env('1')
-    train_a_model(gpu_id='0', layer_num=5, width=1024, conv_block=1, epoch=30, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
+    # init_env('1', float64=True)
+    training_loop = Training(batch_size=32, epoch=30, l2_regular=1e-2, normalize=True, base_path=RecordMgr.RESULT_PATH)
+    # train_a_model(gpu_id='0', layer_num=5, width=1024, conv_block=1, epoch=30, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, base_path=RecordMgr.RESULT_PATH)
+    training_loop.train_a_model(gpu_id='1', layer_num=5, width=2048, kernel_size=(3, 3), conv_block=1, id=0, model_type=ModelMgr.FINITE_CNN_MODEL, classifier_activation=None, is_freeze=True, 
+                                closed_form=True, float64=False)
 
-    record_mgr = RecordMgr.get_ensemble_model_RecordMgr(base_path=RecordMgr.RESULT_PATH, id=0)
-    model = record_mgr.load_model()
-    (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=None, is_onehot=True)
-    evaluate_model(model=model, x_test=x_test, y_test=y_test)
+    # record_mgr = RecordMgr.get_ensemble_model_RecordMgr(base_path=RecordMgr.RESULT_PATH, id=0)
+    # model = record_mgr.load_model()
+    # (x_train, y_train), (x_test, y_test) = get_CIFAR10(sel_label=None, is_onehot=True)
+    # evaluate_model(model=model, x_test=x_test, y_test=y_test)
 
     # model_list = record_mgr.load_ensemble(num_model=50, input_shape=(32, 32, 3), classes=10, model_type=ModelMgr.FINITE_CNN_MODEL, base_path=SHARE_DISK, classifier_activation=None)
     # model_list, loss, acc = evaluate_ensemble(model_list=model_list, x_test=x_test, y_test=y_test, eval_non_act=False)
